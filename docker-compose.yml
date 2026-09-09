@@ -63,10 +63,15 @@ services:
     build:
       context: ./pyspark
     container_name: indutechdata-pyspark
+    user: "0:0"
     environment:
       REDPANDA_BROKERS: redpanda:9092
       REDPANDA_TOPIC: client_tickets
       SPARK_CHECKPOINT_DIR: /tmp/spark-checkpoints/ticket-insights
+      SPARK_OUTPUT_DIR: /app/output/ticket-aggregates
+      SPARK_TRIGGER_INTERVAL: "15 seconds"
+    volumes:
+      - ./data/output:/app/output
     depends_on:
       redpanda:
         condition: service_healthy
