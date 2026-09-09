@@ -1,0 +1,94 @@
+name: indutechdata-poc
+
+services:
+  redpanda:
+    image: docker.redpanda.com/redpandadata/redpanda:v26.2.2
+    container_name: indutechdata-redpanda
+    command:
+      - redpanda
+      - start
+      - --mode
+      - dev-container
+      - --smp
+      - "1"
+      - --kafka-addr
+      - internal://0.0.0.0:9092,external://0.0.0.0:19092
+      - --advertise-kafka-addr
+      - internal://redpanda:9092,external://localhost:19092
+      - --rpc-addr
+      - 0.0.0.0:33145
+      - --advertise-rpc-addr
+      - redpanda:33145
+    ports:
+      - "19092:19092"
+      - "9644:9644"
+    volumes:
+      - redpanda_data:/var/lib/redpanda/data
+    healthcheck:
+      test: ["CMD", "rpk", "cluster", "info", "-X", "brokers=redpanda:9092"]
+      interval: 5s
+      timeout: 10s
+      retries: 12
+    restart: unless-stopped
+
+  topic-init:
+    image: docker.redpanda.com/redpandadata/redpanda:v26.2.2
+    container_name: indutechdata-topic-init
+    command:
+      - topic
+      - create
+      - client_tickets
+      - --if-not-exists
+      - -X
+      - brokers=redpanda:9092
+    depends_on:
+      redpanda:
+        condition: service_healthy
+
+  console:
+    image: docker.redpanda.com/redpandadata/console:v3.11.0
+    container_name: indutechdata-console
+    environment:
+      KAFKA_BROKERS: redpanda:9092
+    ports:
+      - "8080:8080"
+    depends_on:
+      redpanda:
+        condition: service_healthy
+      topic-init:
+        condition: service_completed_successfully
+    restart: unless-stopped
+
+  pyspark:
+    build:
+      context: ./pyspark
+    container_name: indutechdata-pyspark
+    environment:
+      REDPANDA_BROKERS: redpanda:9092
+      REDPANDA_TOPIC: client_tickets
+      SPARK_CHECKPOINT_DIR: /tmp/spark-checkpoints/ticket-insights
+    depends_on:
+      redpanda:
+        condition: service_healthy
+      topic-init:
+        condition: service_completed_successfully
+    restart: unless-stopped
+
+  producer:
+    build:
+      context: ./producer
+    container_name: indutechdata-producer
+    environment:
+      REDPANDA_BROKERS: redpanda:9092
+      REDPANDA_TOPIC: client_tickets
+      TICKET_INTERVAL_SECONDS: "1"
+      TICKET_MAX_MESSAGES: "20"
+    depends_on:
+      redpanda:
+        condition: service_healthy
+      topic-init:
+        condition: service_completed_successfully
+    restart: "no"
+
+volumes:
+  redpanda_data:
